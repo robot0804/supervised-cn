@@ -1,12 +1,12 @@
-name: Update Docker Image and Sync to Gitee
+name: Upload Docker Image Tar to Gitee Release
 
 on:
   schedule:
-    - cron: '*/45 * * * *'  # 每五分钟触发一次
+    - cron: '*/5 * * * *'  # 每五分钟触发一次
   workflow_dispatch:  # 允许手动触发
 
 jobs:
-  sync-docker-images:
+  upload-docker-image:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,76 +23,53 @@ jobs:
         echo "Latest version is: $LATEST_VERSION"
         echo "LATEST_VERSION=$LATEST_VERSION" >> $GITHUB_ENV
 
-    - name: Fetch Gitee existing version
-      id: fetch_gitee_version
+    - name: Create or get existing Gitee Release
+      id: create_release
       run: |
-        # 获取 Gitee 中保存的版本号
-        GITEE_VERSION=$(curl -s -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
-        "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/contents/version.json" | jq -r '.content' | base64 -d | jq -r '.supervisor')
-
-        echo "Gitee version is: $GITEE_VERSION"
-        echo "GITEE_VERSION=$GITEE_VERSION" >> $GITHUB_ENV
-
-    - name: Compare Versions
-      id: compare_versions
-      run: |
-        if [ "${{ env.LATEST_VERSION }}" == "${{ env.GITEE_VERSION }}" ]; then
-          echo "No new version available."
-          echo "::set-output name=new_version::false"
+        # 检查是否存在对应的 Release
+        RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
+          "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/releases/tags/${{ env.LATEST_VERSION }}")
+        
+        # 如果 Release 不存在，则创建一个新的
+        if echo "$RESPONSE" | grep -q '"message":"Not Found"'; then
+          echo "Release not found, creating new one..."
+          curl -X POST -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
+            -d "{\"tag_name\": \"${{ env.LATEST_VERSION }}\", \"name\": \"Version $LATEST_VERSION\", \"body\": \"Release for supervisor version $LATEST_VERSION\"}" \
+            "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/releases"
         else
-          echo "New version available."
-          echo "::set-output name=new_version::true"
+          echo "Release already exists."
         fi
 
-    - name: Pull aarch64 Docker Image
-      if: steps.compare_versions.outputs.new_version == 'true'
+    - name: Pull and save aarch64 Docker Image
       run: |
         docker pull ghcr.io/home-assistant/aarch64-hassio-supervisor:${{ env.LATEST_VERSION }}
         docker save ghcr.io/home-assistant/aarch64-hassio-supervisor:${{ env.LATEST_VERSION }} -o aarch64_supervisor_${{ env.LATEST_VERSION }}.tar
 
-    - name: Pull amd64 Docker Image
-      if: steps.compare_versions.outputs.new_version == 'true'
+    - name: Pull and save amd64 Docker Image
       run: |
         docker pull ghcr.io/home-assistant/amd64-hassio-supervisor:${{ env.LATEST_VERSION }}
         docker save ghcr.io/home-assistant/amd64-hassio-supervisor:${{ env.LATEST_VERSION }} -o amd64_supervisor_${{ env.LATEST_VERSION }}.tar
 
-    - name: Delete Old Tar Files on Gitee
-      if: steps.compare_versions.outputs.new_version == 'true'
+    - name: Upload aarch64 Tar to Gitee Release
       run: |
-        # 删除旧的 aarch64 和 amd64 tar 文件
-        curl -X DELETE -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
-        -d '{"message": "delete old tar files", "branch": "main"}' \
-        "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/contents/aarch64_supervisor_${{ env.GITEE_VERSION }}.tar"
-        
-        curl -X DELETE -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
-        -d '{"message": "delete old tar files", "branch": "main"}' \
-        "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/contents/amd64_supervisor_${{ env.GITEE_VERSION }}.tar"
+        # 获取 Release ID
+        RELEASE_ID=$(curl -s -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
+          "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/releases/tags/${{ env.LATEST_VERSION }}" | jq -r '.id')
 
-    - name: Upload New aarch64 Tar File to Gitee
-      if: steps.compare_versions.outputs.new_version == 'true'
-      run: |
-        # 上传新的 aarch64 tar 文件到 Gitee
-        NEW_TAR_PATH="aarch64_supervisor_${{ env.LATEST_VERSION }}.tar"
+        # 上传文件到 Release
         curl -X POST -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
-        -F "access_token=${{ secrets.GITEE_TOKEN }}" \
-        -F "file=@aarch64_supervisor_${{ env.LATEST_VERSION }}.tar" \
-        "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/contents/${NEW_TAR_PATH}"
+          -F "name=aarch64_supervisor_${{ env.LATEST_VERSION }}.tar" \
+          -F "file=@aarch64_supervisor_${{ env.LATEST_VERSION }}.tar" \
+          "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/releases/${RELEASE_ID}/assets"
 
-    - name: Upload New amd64 Tar File to Gitee
-      if: steps.compare_versions.outputs.new_version == 'true'
+    - name: Upload amd64 Tar to Gitee Release
       run: |
-        # 上传新的 amd64 tar 文件到 Gitee
-        NEW_TAR_PATH="amd64_supervisor_${{ env.LATEST_VERSION }}.tar"
+        # 获取 Release ID
+        RELEASE_ID=$(curl -s -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
+          "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/releases/tags/${{ env.LATEST_VERSION }}" | jq -r '.id')
+
+        # 上传文件到 Release
         curl -X POST -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
-        -F "access_token=${{ secrets.GITEE_TOKEN }}" \
-        -F "file=@amd64_supervisor_${{ env.LATEST_VERSION }}.tar" \
-        "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/contents/${NEW_TAR_PATH}"
-
-    - name: Update Version File on Gitee
-      if: steps.compare_versions.outputs.new_version == 'true'
-      run: |
-        # 更新 Gitee 上的版本号信息文件
-        echo '{"supervisor": "'${{ env.LATEST_VERSION }}'"}' > version.json
-        curl -X PUT -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
-        -d '{"content":"'$(base64 version.json)'", "message": "update supervisor version to '${{ env.LATEST_VERSION }}'", "branch": "main"}' \
-        "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/contents/version.json"
+          -F "name=amd64_supervisor_${{ env.LATEST_VERSION }}.tar" \
+          -F "file=@amd64_supervisor_${{ env.LATEST_VERSION }}.tar" \
+          "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/releases/${RELEASE_ID}/assets"
