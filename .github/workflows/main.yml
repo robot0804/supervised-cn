@@ -30,15 +30,23 @@ jobs:
         RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
           "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/releases/tags/${{ env.LATEST_VERSION }}")
         
+        echo "Release response: $RESPONSE"
+
         # 如果 Release 不存在，则创建一个新的
         if echo "$RESPONSE" | grep -q '"message":"Not Found"'; then
           echo "Release not found, creating new one..."
-          curl -X POST -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
+          CREATE_RESPONSE=$(curl -s -X POST -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
             -d "{\"tag_name\": \"${{ env.LATEST_VERSION }}\", \"name\": \"Version $LATEST_VERSION\", \"body\": \"Release for supervisor version $LATEST_VERSION\"}" \
-            "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/releases"
+            "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/releases")
+          
+          echo "Create response: $CREATE_RESPONSE"
+          RELEASE_ID=$(echo "$CREATE_RESPONSE" | jq -r '.id')
         else
-          echo "Release already exists."
+          RELEASE_ID=$(echo "$RESPONSE" | jq -r '.id')
         fi
+
+        echo "Release ID: $RELEASE_ID"
+        echo "RELEASE_ID=$RELEASE_ID" >> $GITHUB_ENV
 
     - name: Pull and save aarch64 Docker Image
       run: |
@@ -52,9 +60,8 @@ jobs:
 
     - name: Upload aarch64 Tar to Gitee Release
       run: |
-        # 获取 Release ID
-        RELEASE_ID=$(curl -s -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
-          "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/releases/tags/${{ env.LATEST_VERSION }}" | jq -r '.id')
+        # 确保 Release ID 是从上一步成功获取
+        echo "Uploading to Release ID: $RELEASE_ID"
 
         # 上传文件到 Release
         curl -X POST -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
@@ -64,9 +71,8 @@ jobs:
 
     - name: Upload amd64 Tar to Gitee Release
       run: |
-        # 获取 Release ID
-        RELEASE_ID=$(curl -s -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
-          "https://gitee.com/api/v5/repos/smarthomefans/supervisor-cn/releases/tags/${{ env.LATEST_VERSION }}" | jq -r '.id')
+        # 确保 Release ID 是从上一步成功获取
+        echo "Uploading to Release ID: $RELEASE_ID"
 
         # 上传文件到 Release
         curl -X POST -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
