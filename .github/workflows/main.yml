@@ -2,7 +2,6 @@ name: Upload Docker Image Tar to Gitee Release
 
 on:
   schedule:
-    - cron: '*/125 * * * *'  # 每五分钟触发一次
   workflow_dispatch:  # 允许手动触发
 
 jobs:
